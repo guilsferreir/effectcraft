@@ -343,11 +343,13 @@ pub fn show(app: &mut EffectcraftApp, ctx: &egui::Context) {
 mod tests {
     use super::*;
 
+    /// Run `search` with no recents/favorites/presets and return the display labels.
     fn top(query: &str) -> Vec<String> {
         search(query, &[], &BTreeSet::new(), &[]).into_iter().map(|h| h.label).collect()
     }
 
     #[test]
+    /// Verifies the scoring tiers: exact > prefix > word-start > initials > substring > letters.
     fn scoring_prefers_exact_then_prefix_then_words_then_initials_then_letters() {
         let s = |n| score(n, "gaussian blur").unwrap_or(-1);
         assert_eq!(s("Gaussian Blur"), 1000);
@@ -365,6 +367,7 @@ mod tests {
     }
 
     #[test]
+    /// Verifies that search returns effects matching by full name, initials, and letter sequence.
     fn search_finds_effects_by_name_initials_and_letters() {
         assert_eq!(top("gaussian blur").first().map(String::as_str), Some("Gaussian Blur"));
         assert!(top("gb").iter().take(3).any(|l| l == "Gaussian Blur"), "{:?}", top("gb"));
@@ -375,6 +378,8 @@ mod tests {
     }
 
     #[test]
+    /// Verifies that recently used and favourite effects rank higher, and that an empty query
+    /// returns the recent list (most-recent-first, unknown IDs skipped).
     fn recent_and_favourites_rank_higher_and_empty_lists_recent() {
         let reg = effectcraft_engine::effects::all();
         let fast = reg.iter().find(|e| e.name == "Fast Box Blur").map(|e| e.id.to_string()).unwrap();
@@ -392,9 +397,11 @@ mod tests {
     }
 
     #[test]
+    /// Verifies that user preset files are matched and returned as `Target::PresetFile`.
     fn user_presets_are_searched() {
         let p = vec![PresetFile { name: "Bouncy Pop".into(), path: "/x/Bouncy Pop.ecpreset".into() }];
         let hits = search("bouncy", &[], &BTreeSet::new(), &p);
         assert_eq!(hits.first().map(|h| &h.target), Some(&Target::PresetFile("/x/Bouncy Pop.ecpreset".into())));
     }
 }
+
