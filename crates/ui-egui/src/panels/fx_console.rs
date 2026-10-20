@@ -44,10 +44,15 @@ pub enum Target {
 /// One search result.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Hit {
+    /// Display name shown in the result list (in the interface language).
     pub label: String,
-    /// Category shown on the right.
+    /// Canonical English name registered with automation.
+    pub auto_label: String,
+    /// Category shown on the right (translated).
     pub detail: String,
+    /// What applying this result does.
     pub target: Target,
+    /// Ranking score (higher is better).
     pub score: i32,
 }
 
@@ -116,12 +121,26 @@ pub fn search(query: &str, recent: &[String], favorites: &BTreeSet<String>, pres
             .iter()
             .filter_map(|id| effects.iter().find(|e| e.id == id))
             .take(MAX_RESULTS)
-            .map(|e| Hit { label: e.name.to_string(), detail: e.category.to_string(), target: Target::Effect(e.id.to_string()), score: 0 })
+            .map(|e| {
+                let shown = crate::i18n::effects::name(e.id, e.name);
+                Hit {
+                    label: shown.to_string(),
+                    auto_label: e.name.to_string(),
+                    detail: crate::i18n::effects::category(e.category).to_string(),
+                    target: Target::Effect(e.id.to_string()),
+                    score: 0,
+                }
+            })
             .collect();
     }
     let mut hits: Vec<Hit> = vec![];
     for e in &effects {
-        let best = std::iter::once(e.name).chain(effectcraft_engine::effects::aliases(e.id).iter().copied()).filter_map(|n| score(n, &q)).max();
+        let shown = crate::i18n::effects::name(e.id, e.name);
+        let best = std::iter::once(e.name)
+            .chain(std::iter::once(shown.as_ref()))
+            .chain(effectcraft_engine::effects::aliases(e.id).iter().copied())
+            .filter_map(|n| score(n, &q))
+            .max();
         let Some(mut s) = best else { continue };
         if let Some(i) = recent.iter().position(|r| r == e.id) {
             s += 40 - 4 * i32::try_from(i.min(10)).unwrap_or(10);
@@ -132,16 +151,34 @@ pub fn search(query: &str, recent: &[String], favorites: &BTreeSet<String>, pres
         if e.category.eq_ignore_ascii_case("Obsolete") {
             s -= 150;
         }
-        hits.push(Hit { label: e.name.to_string(), detail: e.category.to_string(), target: Target::Effect(e.id.to_string()), score: s });
+        hits.push(Hit {
+            label: shown.to_string(),
+            auto_label: e.name.to_string(),
+            detail: crate::i18n::effects::category(e.category).to_string(),
+            target: Target::Effect(e.id.to_string()),
+            score: s,
+        });
     }
     for (id, name) in effectcraft_engine::text_presets() {
         if let Some(s) = score(&name, &q) {
-            hits.push(Hit { label: name, detail: "Text Preset".into(), target: Target::TextPreset(id), score: s - 5 });
+            hits.push(Hit {
+                label: name.clone(),
+                auto_label: name,
+                detail: tr("Text Preset"),
+                target: Target::TextPreset(id),
+                score: s - 5,
+            });
         }
     }
     for f in presets {
         if let Some(s) = score(&f.name, &q) {
-            hits.push(Hit { label: f.name.clone(), detail: "User Preset".into(), target: Target::PresetFile(f.path.clone()), score: s - 5 });
+            hits.push(Hit {
+                label: f.name.clone(),
+                auto_label: f.name.clone(),
+                detail: tr("User Preset"),
+                target: Target::PresetFile(f.path.clone()),
+                score: s - 5,
+            });
         }
     }
     hits.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.label.to_lowercase().cmp(&b.label.to_lowercase())));
@@ -184,19 +221,22 @@ fn highlighted(p: &egui::Painter, pos: egui::Pos2, name: &str, query: &str, t: &
     p.text(pos, Align2::LEFT_CENTER, name, Tokens::ui(12.5), t.text);
 }
 
+/// Render the Effect Console if open, handle keyboard/pointer inputs and apply chosen results.
 pub fn show(app: &mut EffectcraftApp, ctx: &egui::Context) {
     let Some(mut c) = app.dialog_state.fx_console.take() else { return };
     let t = app.tokens;
     // Keys the console owns, taken before the text field sees them.
+    // Shift+Tab is consumed before plain Tab so extra Shift is not treated as a logical match for NONE.
     let (esc, toggle, down, up, keep, enter) = ctx.input_mut(|i| {
-        (
-            i.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
-            i.consume_key(egui::Modifiers::CTRL, egui::Key::Space),
-            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) | i.consume_key(egui::Modifiers::NONE, egui::Key::Tab),
-            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) | i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab),
-            i.consume_key(egui::Modifiers::SHIFT, egui::Key::Enter),
-            i.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
-        )
+        let esc = i.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+        let toggle = i.consume_key(egui::Modifiers::CTRL, egui::Key::Space);
+        let up = i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab)
+            | i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp);
+        let down = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
+            | i.consume_key(egui::Modifiers::NONE, egui::Key::Tab);
+        let keep = i.consume_key(egui::Modifiers::SHIFT, egui::Key::Enter);
+        let enter = i.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+        (esc, toggle, down, up, keep, enter)
     });
     if esc || (toggle && !c.fresh) {
         return;
@@ -263,7 +303,7 @@ pub fn show(app: &mut EffectcraftApp, ctx: &egui::Context) {
                     let name_clip = Rect::from_min_max(r.min, pos2(r.max.x - dw - 18.0, r.max.y));
                     highlighted(&p.with_clip_rect(name_clip), pos2(r.min.x + 28.0, r.center().y), &h.label, &c.query, &t);
                     p.text(pos2(r.max.x - 8.0, r.center().y), Align2::RIGHT_CENTER, &h.detail, Tokens::ui(11.0), t.text_dim);
-                    app.auto.add(&format!("fxConsole.result.{i}"), r, &h.label);
+                    app.auto.add(&format!("fxConsole.result.{i}"), r, &h.auto_label);
                     if resp.clicked() {
                         run = Some((h.target.clone(), ui.input(|inp| inp.modifiers.shift)));
                     }

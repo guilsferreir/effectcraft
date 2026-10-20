@@ -108,3 +108,21 @@ fn without_a_selected_layer_nothing_is_applied_and_the_status_says_why() {
     assert!(effects(&h, l).is_empty());
     assert!(h.state().ui.status.contains("Select a layer"), "{}", h.state().ui.status);
 }
+
+#[test]
+fn tab_and_shift_tab_cycle_selection() {
+    let (mut h, _l) = harness();
+    h.key_press_modifiers(ctrl(), Key::Space);
+    h.run_steps(2);
+    type_text(&mut h, "blur");
+
+    // Tab cycles down
+    h.key_press(Key::Tab);
+    h.run_steps(1);
+    assert_eq!(h.state().dialog_state.fx_console.as_ref().map(|c| c.sel), Some(1));
+
+    // Shift+Tab cycles back up
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+    h.run_steps(1);
+    assert_eq!(h.state().dialog_state.fx_console.as_ref().map(|c| c.sel), Some(0));
+}
