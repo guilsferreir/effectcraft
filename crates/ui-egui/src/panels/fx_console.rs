@@ -164,7 +164,7 @@ pub fn search(query: &str, recent: &[String], favorites: &BTreeSet<String>, pres
             hits.push(Hit {
                 label: name.clone(),
                 auto_label: name,
-                detail: tr("Text Preset"),
+                detail: tr("Text Preset").to_string(),
                 target: Target::TextPreset(id),
                 score: s - 5,
             });
@@ -175,7 +175,7 @@ pub fn search(query: &str, recent: &[String], favorites: &BTreeSet<String>, pres
             hits.push(Hit {
                 label: f.name.clone(),
                 auto_label: f.name.clone(),
-                detail: tr("User Preset"),
+                detail: tr("User Preset").to_string(),
                 target: Target::PresetFile(f.path.clone()),
                 score: s - 5,
             });
